@@ -2,14 +2,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { WorkspaceData, Correction } from '../types';
 
-// Vercel 환경 변수에서 설정 정보를 가져옵니다.
-// 설정 전에는 로컬 스토리지를 폴백(Fallback)으로 사용하도록 설계하여 앱이 깨지지 않게 합니다.
-// Fix: Use process.env instead of import.meta.env to avoid TypeScript errors and follow environment variable guidelines.
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
+/**
+ * Vercel + Vite 환경에서는 import.meta.env를 사용해야 합니다.
+ * VITE_ 접두사가 붙은 변수만 브라우저로 노출됩니다.
+ */
+// Use process.env to resolve "Property 'env' does not exist on type 'ImportMeta'" errors
+const SUPABASE_URL = (process.env.VITE_SUPABASE_URL as string) || '';
+// Use process.env to resolve "Property 'env' does not exist on type 'ImportMeta'" errors
+const SUPABASE_KEY = (process.env.VITE_SUPABASE_ANON_KEY as string) || '';
 
-const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// Supabase 클라이언트 초기화 (설정이 없으면 null 반환)
+export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 const STORAGE_KEY_PREFIX = 'teacher_hub_ws_';
+
+// 현재 연결 상태 확인용 (UI 표시용)
+export const isCloudConnected = () => !!supabase;
 
 export const getWorkspace = async (code: string): Promise<WorkspaceData> => {
   if (!supabase) {
@@ -17,14 +24,19 @@ export const getWorkspace = async (code: string): Promise<WorkspaceData> => {
     return raw ? JSON.parse(raw) : { students: [], timetable: [], corrections: [] };
   }
 
-  const { data, error } = await supabase
-    .from('workspaces')
-    .select('data')
-    .eq('id', code)
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('workspaces')
+      .select('data')
+      .eq('id', code)
+      .single();
 
-  if (error || !data) return { students: [], timetable: [], corrections: [] };
-  return data.data as WorkspaceData;
+    if (error || !data) return { students: [], timetable: [], corrections: [] };
+    return data.data as WorkspaceData;
+  } catch (err) {
+    console.error("DB Fetch Error:", err);
+    return { students: [], timetable: [], corrections: [] };
+  }
 };
 
 export const saveWorkspace = async (code: string, partialData: Partial<WorkspaceData>) => {
@@ -36,9 +48,11 @@ export const saveWorkspace = async (code: string, partialData: Partial<Workspace
     return;
   }
 
-  await supabase
+  const { error } = await supabase
     .from('workspaces')
     .upsert({ id: code, data: updated }, { onConflict: 'id' });
+    
+  if (error) console.error("DB Save Error:", error);
 };
 
 export const clearWorkspace = async (code: string) => {
