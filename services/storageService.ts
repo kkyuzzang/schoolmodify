@@ -3,16 +3,39 @@ import { createClient } from '@supabase/supabase-js';
 import { WorkspaceData, Correction } from '../types';
 
 /**
- * Vercel + Vite 환경에서는 import.meta.env를 사용해야 합니다.
- * VITE_ 접두사가 붙은 변수만 브라우저로 노출됩니다.
+ * 환경 변수를 안전하게 가져오는 함수
+ * Vite의 import.meta.env와 일반적인 process.env를 모두 확인합니다.
  */
-// Use process.env to resolve "Property 'env' does not exist on type 'ImportMeta'" errors
-const SUPABASE_URL = (process.env.VITE_SUPABASE_URL as string) || '';
-// Use process.env to resolve "Property 'env' does not exist on type 'ImportMeta'" errors
-const SUPABASE_KEY = (process.env.VITE_SUPABASE_ANON_KEY as string) || '';
+const getSafeEnv = (key: string): string => {
+  try {
+    // 1. Vite 환경 확인
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+      return (import.meta as any).env[key] || '';
+    }
+    // 2. process.env 환경 확인 (일부 폴리필/Vercel 환경)
+    if (typeof process !== 'undefined' && process.env) {
+      return (process.env as any)[key] || '';
+    }
+  } catch (e) {
+    console.error(`Error reading env key ${key}:`, e);
+  }
+  return '';
+};
 
-// Supabase 클라이언트 초기화 (설정이 없으면 null 반환)
-export const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const SUPABASE_URL = getSafeEnv('VITE_SUPABASE_URL');
+const SUPABASE_KEY = getSafeEnv('VITE_SUPABASE_ANON_KEY');
+
+// URL 형식이 맞는지 간단히 체크 (https:// 가 포함되어야 함)
+const isValidUrl = SUPABASE_URL.startsWith('https://');
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn("⚠️ Supabase 환경 변수가 설정되지 않았습니다. 로컬 모드로 동작합니다.");
+} else if (!isValidUrl) {
+  console.error("❌ VITE_SUPABASE_URL 형식이 잘못되었습니다. https:// 로 시작하는 Project URL을 입력했는지 확인하세요.");
+}
+
+// Supabase 클라이언트 초기화 (유효한 정보가 있을 때만)
+export const supabase = (isValidUrl && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 const STORAGE_KEY_PREFIX = 'teacher_hub_ws_';
 
 // 현재 연결 상태 확인용 (UI 표시용)
