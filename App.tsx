@@ -9,6 +9,7 @@ import { clearWorkspace } from './services/storageService';
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [workspaceCode, setWorkspaceCode] = useState<string>('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -30,11 +31,18 @@ const App: React.FC = () => {
     setView(AppState.SELECT);
   };
 
-  const handleConfirmDelete = () => {
-    clearWorkspace(workspaceCode);
-    alert("모든 데이터가 성공적으로 삭제되었습니다.");
-    setView(AppState.HOME);
-    setWorkspaceCode('');
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await clearWorkspace(workspaceCode);
+      alert("서버의 모든 데이터가 성공적으로 삭제되었습니다.");
+      setView(AppState.HOME);
+      setWorkspaceCode('');
+    } catch (err) {
+      alert("삭제 중 오류가 발생했습니다.");
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -117,21 +125,23 @@ const App: React.FC = () => {
               <h2 className="text-2xl font-black text-slate-800 mb-4">정말 삭제하시겠습니까?</h2>
               <div className="bg-rose-50 p-6 rounded-2xl mb-8">
                 <p className="text-rose-700 font-bold leading-relaxed">
-                  이 버튼을 실행하면 입력한 모든 자료와 개인정보가 사라집니다.<br/>
-                  업로드한 엑셀 파일 정보와 정정 내역이 모두 초기화됩니다.
+                  이 버튼을 실행하면 서버에 저장된 모든 자료와 개인정보가 사라집니다.<br/>
+                  다른 선생님들의 화면에서도 모든 데이터가 즉시 초기화됩니다.
                 </p>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <button
+                  disabled={isDeleting}
                   onClick={handleConfirmDelete}
-                  className="py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl shadow-lg shadow-rose-100 transition-all active:scale-95"
+                  className="py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl shadow-lg shadow-rose-100 transition-all active:scale-95 disabled:opacity-50"
                 >
-                  예, 모두 삭제합니다
+                  {isDeleting ? "삭제 중..." : "예, 모두 삭제합니다"}
                 </button>
                 <button
+                  disabled={isDeleting}
                   onClick={() => setView(AppState.SELECT)}
-                  className="py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-2xl transition-all active:scale-95"
+                  className="py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-2xl transition-all active:scale-95 disabled:opacity-50"
                 >
                   아니오, 취소합니다
                 </button>

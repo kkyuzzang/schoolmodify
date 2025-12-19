@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { getWorkspace, updateCorrectionStatus } from '../services/storageService';
-import { Correction } from '../types';
+import { Correction, WorkspaceData } from '../types';
 
 interface TeacherViewProps {
   workspaceCode: string;
@@ -9,12 +9,20 @@ interface TeacherViewProps {
 }
 
 const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
-  const [data, setData] = useState(() => getWorkspace(workspaceCode));
+  const [data, setData] = useState<WorkspaceData>({ students: [], timetable: [], corrections: [] });
   const [selectedTeacher, setSelectedTeacher] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchData = async () => {
+    const ws = await getWorkspace(workspaceCode);
+    setData(ws);
+    setIsLoading(false);
+  };
 
   useEffect(() => {
-    setData(getWorkspace(workspaceCode));
-    const interval = setInterval(() => setData(getWorkspace(workspaceCode)), 3000);
+    fetchData();
+    // 3초마다 클라우드 데이터 확인하여 타 PC의 변경사항 실시간 반영
+    const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, [workspaceCode]);
 
@@ -43,10 +51,28 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
       .sort((a, b) => a.studentId.localeCompare(b.studentId));
   }, [selectedTeacher, data.corrections]);
 
-  const handleToggleComplete = (correctionId: string, currentStatus: boolean) => {
-    updateCorrectionStatus(workspaceCode, correctionId, !currentStatus);
-    setData(getWorkspace(workspaceCode));
+  const handleToggleComplete = async (correctionId: string, currentStatus: boolean) => {
+    // 낙관적 업데이트 (UI 즉시 반응)
+    setData(prev => ({
+      ...prev,
+      corrections: prev.corrections.map(c => 
+        c.id === correctionId ? { ...c, isCompleted: !currentStatus, completedAt: !currentStatus ? Date.now() : undefined } : c
+      )
+    }));
+    
+    // DB 업데이트
+    await updateCorrectionStatus(workspaceCode, correctionId, !currentStatus);
+    await fetchData(); // 최종 데이터 동기화
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[80vh]">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="mt-4 font-bold text-slate-500">클라우드 데이터 불러오는 중...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -66,7 +92,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
         <h2 className="text-2xl font-black text-slate-800 mb-6">교과 담당 교사 확인</h2>
         
         <div className="space-y-6">
-          <p className="text-slate-500 text-sm font-medium">성함을 선택하여 배정된 정정 내역을 확인하세요.</p>
+          <p className="text-slate-500 text-sm font-medium">성함을 선택하여 배정된 정정 내역을 확인하세요. (모든 기기 실시간 동기화됨)</p>
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {teacherList.map(name => {
@@ -94,7 +120,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
             })}
             {teacherList.length === 0 && (
               <div className="text-slate-400 italic py-16 col-span-full text-center border-4 border-dashed border-slate-50 rounded-3xl">
-                등록된 시간표 데이터가 없습니다. 담임 페이지에서 엑셀을 업로드해주세요.
+                등록된 데이터가 없습니다. 담임 페이지에서 엑셀을 업로드해주세요.
               </div>
             )}
           </div>
@@ -112,7 +138,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
             </div>
             <div className="bg-green-50 text-green-700 px-4 py-2 rounded-xl text-xs font-black border border-green-200 flex items-center gap-2">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-              실시간 업데이트 중
+              클라우드 실시간 동기화 중
             </div>
           </div>
 

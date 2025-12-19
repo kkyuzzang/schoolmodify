@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { parseStudentExcel, parseTimetableExcel, parseCorrectionExcel } from '../utils/parser';
 import { getWorkspace, saveWorkspace, addCorrection, deleteCorrection, addMultipleCorrections } from '../services/storageService';
-import { Student, TimetableEntry, Correction } from '../types';
+import { Student, TimetableEntry, Correction, WorkspaceData } from '../types';
 import { isSameSubject, normalizeSubjectName } from '../utils/normalization';
 
 interface HomeroomViewProps {
@@ -21,8 +21,9 @@ interface AvailableSubject {
 }
 
 const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) => {
-  const [data, setData] = useState(() => getWorkspace(workspaceCode));
+  const [data, setData] = useState<WorkspaceData>({ students: [], timetable: [], corrections: [] });
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   
@@ -32,8 +33,17 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     after: ''
   });
 
+  const fetchData = async () => {
+    const ws = await getWorkspace(workspaceCode);
+    setData(ws);
+    setIsLoading(false);
+  };
+
   useEffect(() => {
-    setData(getWorkspace(workspaceCode));
+    fetchData();
+    // 담임 페이지도 5초마다 실시간 동기화 (완료 여부 확인용)
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, [workspaceCode]);
 
   const classes = useMemo(() => {
@@ -59,8 +69,8 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     setIsUploading(true);
     try {
       const students = await parseStudentExcel(e.target.files[0]);
-      saveWorkspace(workspaceCode, { students });
-      setData(getWorkspace(workspaceCode));
+      await saveWorkspace(workspaceCode, { students });
+      await fetchData();
     } catch (err) {
       alert('파일 파싱 중 오류가 발생했습니다.');
     } finally {
@@ -73,8 +83,8 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     setIsUploading(true);
     try {
       const timetable = await parseTimetableExcel(e.target.files[0]);
-      saveWorkspace(workspaceCode, { timetable });
-      setData(getWorkspace(workspaceCode));
+      await saveWorkspace(workspaceCode, { timetable });
+      await fetchData();
     } catch (err) {
       alert('파일 파싱 중 오류가 발생했습니다.');
     } finally {
@@ -87,9 +97,9 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     setIsUploading(true);
     try {
       const corrections = await parseCorrectionExcel(e.target.files[0], workspaceCode);
-      addMultipleCorrections(workspaceCode, corrections);
-      setData(getWorkspace(workspaceCode));
-      alert(`${corrections.length}건의 정정 내역이 누적 업로드되었습니다.`);
+      await addMultipleCorrections(workspaceCode, corrections);
+      await fetchData();
+      alert(`${corrections.length}건의 정정 내역이 클라우드에 업로드되었습니다.`);
     } catch (err) {
       alert('백업 파일 파싱 중 오류가 발생했습니다.');
     } finally {
@@ -216,7 +226,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     return teachers.length > 0 ? teachers : ["담당교사 미확인"];
   };
 
-  const handleAddCorrection = () => {
+  const handleAddCorrection = async () => {
     if (!selectedStudent || !newCorrection.subjectKey || !newCorrection.before || !newCorrection.after) {
       alert('모든 정보를 입력하세요.');
       return;
@@ -239,15 +249,29 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
       teachers: teachers[0] === "담당교사 미확인" ? [] : teachers,
       createdAt: Date.now()
     };
-    addCorrection(workspaceCode, correction);
-    setData(getWorkspace(workspaceCode));
+    await addCorrection(workspaceCode, correction);
+    await fetchData();
     setNewCorrection(prev => ({ ...prev, before: '', after: '' }));
+  };
+
+  const handleDeleteCorrection = async (id: string) => {
+    await deleteCorrection(workspaceCode, id);
+    await fetchData();
   };
 
   const studentCorrections = useMemo(() => {
     if (!selectedStudentId) return [];
     return data.corrections.filter(c => c.studentId === selectedStudentId);
   }, [selectedStudentId, data.corrections]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[80vh]">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="mt-4 font-bold text-slate-500">클라우드 데이터 불러오는 중...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -471,7 +495,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
                             )}
                           </div>
                         </div>
-                        <button onClick={() => { deleteCorrection(workspaceCode, c.id); setData(getWorkspace(workspaceCode)); }} className="text-rose-500 hover:bg-rose-50 px-3 py-1 rounded-lg text-xs font-bold transition-all mt-2 md:mt-0 opacity-0 group-hover:opacity-100">
+                        <button onClick={() => handleDeleteCorrection(c.id)} className="text-rose-500 hover:bg-rose-50 px-3 py-1 rounded-lg text-xs font-bold transition-all mt-2 md:mt-0 opacity-0 group-hover:opacity-100">
                           삭제
                         </button>
                       </div>
@@ -488,7 +512,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
         <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-[100]">
           <div className="flex flex-col items-center">
             <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-            <p className="mt-4 font-bold text-indigo-700">데이터를 분석하고 있습니다...</p>
+            <p className="mt-4 font-bold text-indigo-700">데이터를 분석하고 클라우드에 동기화 중...</p>
           </div>
         </div>
       )}

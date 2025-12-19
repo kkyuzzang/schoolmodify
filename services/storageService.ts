@@ -1,45 +1,75 @@
 
-import { WorkspaceData, Correction, Student, TimetableEntry } from '../types';
+import { createClient } from '@supabase/supabase-js';
+import { WorkspaceData, Correction } from '../types';
 
+// Vercel 환경 변수에서 설정 정보를 가져옵니다.
+// 설정 전에는 로컬 스토리지를 폴백(Fallback)으로 사용하도록 설계하여 앱이 깨지지 않게 합니다.
+// Fix: Use process.env instead of import.meta.env to avoid TypeScript errors and follow environment variable guidelines.
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
+
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 const STORAGE_KEY_PREFIX = 'teacher_hub_ws_';
 
-export const saveWorkspace = (code: string, data: Partial<WorkspaceData>) => {
-  const existing = getWorkspace(code);
-  const updated = { ...existing, ...data };
-  localStorage.setItem(`${STORAGE_KEY_PREFIX}${code}`, JSON.stringify(updated));
+export const getWorkspace = async (code: string): Promise<WorkspaceData> => {
+  if (!supabase) {
+    const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}${code}`);
+    return raw ? JSON.parse(raw) : { students: [], timetable: [], corrections: [] };
+  }
+
+  const { data, error } = await supabase
+    .from('workspaces')
+    .select('data')
+    .eq('id', code)
+    .single();
+
+  if (error || !data) return { students: [], timetable: [], corrections: [] };
+  return data.data as WorkspaceData;
 };
 
-export const getWorkspace = (code: string): WorkspaceData => {
-  const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}${code}`);
-  if (!raw) return { students: [], timetable: [], corrections: [] };
-  return JSON.parse(raw);
+export const saveWorkspace = async (code: string, partialData: Partial<WorkspaceData>) => {
+  const existing = await getWorkspace(code);
+  const updated = { ...existing, ...partialData };
+
+  if (!supabase) {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}${code}`, JSON.stringify(updated));
+    return;
+  }
+
+  await supabase
+    .from('workspaces')
+    .upsert({ id: code, data: updated }, { onConflict: 'id' });
 };
 
-export const clearWorkspace = (code: string) => {
-  localStorage.removeItem(`${STORAGE_KEY_PREFIX}${code}`);
+export const clearWorkspace = async (code: string) => {
+  if (!supabase) {
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}${code}`);
+    return;
+  }
+
+  await supabase.from('workspaces').delete().eq('id', code);
 };
 
-export const addCorrection = (code: string, correction: Correction) => {
-  const ws = getWorkspace(code);
+export const addCorrection = async (code: string, correction: Correction) => {
+  const ws = await getWorkspace(code);
   ws.corrections = [...ws.corrections, correction];
-  saveWorkspace(code, ws);
+  await saveWorkspace(code, ws);
 };
 
-export const addMultipleCorrections = (code: string, corrections: Correction[]) => {
-  const ws = getWorkspace(code);
-  // 중복 방지를 원한다면 ID 체크를 할 수 있지만, 백업의 특성상 누적 추가를 허용합니다.
+export const addMultipleCorrections = async (code: string, corrections: Correction[]) => {
+  const ws = await getWorkspace(code);
   ws.corrections = [...ws.corrections, ...corrections];
-  saveWorkspace(code, ws);
+  await saveWorkspace(code, ws);
 };
 
-export const deleteCorrection = (code: string, correctionId: string) => {
-  const ws = getWorkspace(code);
+export const deleteCorrection = async (code: string, correctionId: string) => {
+  const ws = await getWorkspace(code);
   ws.corrections = ws.corrections.filter(c => c.id !== correctionId);
-  saveWorkspace(code, ws);
+  await saveWorkspace(code, ws);
 };
 
-export const updateCorrectionStatus = (code: string, correctionId: string, isCompleted: boolean) => {
-  const ws = getWorkspace(code);
+export const updateCorrectionStatus = async (code: string, correctionId: string, isCompleted: boolean) => {
+  const ws = await getWorkspace(code);
   ws.corrections = ws.corrections.map(c => {
     if (c.id === correctionId) {
       return {
@@ -50,5 +80,5 @@ export const updateCorrectionStatus = (code: string, correctionId: string, isCom
     }
     return c;
   });
-  saveWorkspace(code, ws);
+  await saveWorkspace(code, ws);
 };
