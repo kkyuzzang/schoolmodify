@@ -124,12 +124,12 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
           ) : (
             <div className="grid gap-4">
               {teacherCorrections.map(c => (
-                <div key={c.id} className={`group bg-white border-2 rounded-2xl p-6 transition-all relative overflow-hidden flex flex-col md:flex-row md:items-center gap-6 ${
+                <div key={c.id} className={`group bg-white border-2 rounded-2xl p-6 transition-all relative overflow-hidden flex flex-col md:flex-row md:items-start gap-6 ${
                   c.isCompleted ? 'border-green-100 bg-green-50/20 opacity-70' : 'border-slate-100 hover:border-indigo-200'
                 }`}>
                   <div className={`absolute top-0 left-0 w-1.5 h-full ${c.isCompleted ? 'bg-green-400' : 'bg-indigo-500'}`}></div>
                   
-                  <div className="flex items-center">
+                  <div className="flex items-center pt-1">
                     <input 
                       type="checkbox" 
                       id={`chk-${c.id}`}
@@ -140,7 +140,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
                   </div>
 
                   <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <span className="text-[11px] font-black text-slate-400 uppercase tracking-tighter">{c.studentId}</span>
                       <span className="text-lg font-black text-slate-900">{c.studentName}</span>
                       <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full font-bold">{c.gradeClass}</span>
@@ -150,21 +150,21 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
                     </div>
                   </div>
                   
-                  <div className="flex flex-1 items-center gap-4 bg-white/80 px-5 py-4 rounded-2xl border border-slate-100 shadow-sm">
-                    <div className="flex-1 text-center">
+                  <div className="flex flex-1 items-start gap-4 bg-white/80 px-5 py-4 rounded-2xl border border-slate-100 shadow-sm min-w-0">
+                    <div className="flex-1">
                       <div className="text-[10px] font-black text-slate-400 uppercase mb-1">기존</div>
-                      <div className="text-sm text-slate-400 line-through truncate font-medium">{c.before}</div>
+                      <div className="text-sm text-slate-400 line-through font-medium break-words whitespace-pre-wrap">{c.before}</div>
                     </div>
-                    <div className="text-indigo-300">
+                    <div className="text-indigo-300 pt-5">
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
                     </div>
-                    <div className="flex-1 text-center">
+                    <div className="flex-1">
                       <div className="text-[10px] font-black text-indigo-400 uppercase mb-1">수정 후</div>
-                      <div className="text-base font-black text-indigo-700 truncate">{c.after}</div>
+                      <div className="text-base font-black text-indigo-700 break-words whitespace-pre-wrap">{c.after}</div>
                     </div>
                   </div>
 
-                  <div className="text-right min-w-[120px]">
+                  <div className="text-right min-w-[120px] pt-1">
                     {c.isCompleted ? (
                       <div className="animate-in fade-in slide-in-from-right-2 duration-300">
                         <div className="text-[10px] font-black text-green-600 uppercase">정정 완료 일시</div>
