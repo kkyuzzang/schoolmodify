@@ -3,8 +3,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { parseStudentExcel, parseTimetableExcel, parseCorrectionExcel } from '../utils/parser';
 import { getWorkspace, saveWorkspace, addCorrection, deleteCorrection, addMultipleCorrections } from '../services/storageService';
-import { Student, TimetableEntry, Correction, WorkspaceData } from '../types';
-import { isSameSubject, normalizeSubjectName } from '../utils/normalization';
+import { Student, TimetableEntry, Correction, WorkspaceData, Elective } from '../types';
+import { isSameSubject, normalizeSubjectName, parseGradeClass } from '../utils/normalization';
 
 interface HomeroomViewProps {
   workspaceCode: string;
@@ -24,9 +24,16 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
   const [data, setData] = useState<WorkspaceData>({ students: [], timetable: [], corrections: [] });
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedClass, setSelectedClass] = useState<string>('');
+  
+  // 학년/반 개별 선택 상태
+  const [selectedGrade, setSelectedGrade] = useState<number | ''>('');
+  const [selectedClassNum, setSelectedClassNum] = useState<number | ''>('');
+  
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newStudent, setNewStudent] = useState({ id: '', name: '', electivesRaw: '' });
+
   const [newCorrection, setNewCorrection] = useState({
     subjectKey: '',
     before: '',
@@ -41,27 +48,34 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
 
   useEffect(() => {
     fetchData();
-    // 담임 페이지도 5초마다 실시간 동기화 (완료 여부 확인용)
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [workspaceCode]);
 
-  const classes = useMemo(() => {
-    const set = new Set<string>();
-    data.students.forEach(s => set.add(`${s.grade}학년 ${s.class}반`));
-    return Array.from(set).sort((a, b) => {
-      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-    });
+  // 가용 학년 목록
+  const availableGrades = useMemo(() => {
+    const set = new Set<number>();
+    data.students.forEach(s => set.add(s.grade));
+    return Array.from(set).sort((a, b) => a - b);
   }, [data.students]);
 
-  const globalElectiveNames = useMemo<Set<string>>(() => {
-    const names = new Set<string>();
+  // 선택된 학년의 가용 반 목록
+  const availableClasses = useMemo(() => {
+    if (selectedGrade === '') return [];
+    const set = new Set<number>();
+    data.students.filter(s => s.grade === selectedGrade).forEach(s => set.add(s.class));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [selectedGrade, data.students]);
+
+  const gradeSpecificElectiveNames = useMemo(() => {
+    const map = new Map<number, Set<string>>();
     data.students.forEach(student => {
+      if (!map.has(student.grade)) map.set(student.grade, new Set());
       student.electives.forEach(e => {
-        names.add(normalizeSubjectName(e.subjectName));
+        map.get(student.grade)!.add(normalizeSubjectName(e.subjectName));
       });
     });
-    return names;
+    return map;
   }, [data.students]);
 
   const handleStudentFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,11 +121,43 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     }
   };
 
+  const handleAddStudent = async () => {
+    const { id, name, electivesRaw } = newStudent;
+    if (!id || !name) {
+      alert('학번과 이름을 입력해주세요.');
+      return;
+    }
+
+    const { grade, classNum } = parseGradeClass(id);
+    const electiveParts = electivesRaw.split(',').map(s => s.trim()).filter(s => s);
+    const electives: Elective[] = electiveParts.map(raw => {
+      const parts = raw.split('_');
+      const group = parts[0] || '';
+      const subjectWithClass = parts[parts.length - 1] || '';
+      const subjectName = parts.slice(1, -1).join('_') || parts[1] || raw;
+      const classMatch = subjectWithClass.match(/(\d+)반/);
+      return {
+        raw,
+        group,
+        subjectName,
+        classNum: classMatch ? classMatch[1] : ''
+      };
+    });
+
+    const newStudentObj: Student = { id, name, grade, class: classNum, electives };
+    const updatedStudents = [...data.students.filter(s => s.id !== id), newStudentObj]
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    await saveWorkspace(workspaceCode, { students: updatedStudents });
+    await fetchData();
+    setNewStudent({ id: '', name: '', electivesRaw: '' });
+    setShowAddForm(false);
+  };
+
   const downloadSampleA = () => {
     const sample = [
       ['학번', '성명', '선택1', '선택2', '선택3', '선택4'],
-      ['10101', '홍길동', 'A_화학1_1반', 'B_지구과학1_2반', 'C_경제_1반', 'D_심리학_1반'],
-      ['10102', '김철수', 'A_생명과학1_1반', 'B_물리학1_1반', 'C_정치와법_1반', 'D_철학_2반']
+      ['10101', '홍길동', 'A_화학1_1반', 'B_지구과학1_2반', 'C_경제_1반', 'D_심리학_1반']
     ];
     const ws = XLSX.utils.aoa_to_sheet(sample);
     const wb = XLSX.utils.book_new();
@@ -124,12 +170,13 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
     let fileName = `전체학급_정정내역_백업.xlsx`;
 
     if (!all) {
-      if (!selectedClass) {
-        alert('학급을 먼저 선택해 주세요.');
+      if (selectedGrade === '' || selectedClassNum === '') {
+        alert('학년과 반을 먼저 선택해 주세요.');
         return;
       }
-      corrections = data.corrections.filter(c => c.gradeClass === selectedClass);
-      fileName = `${selectedClass}_정정내역_백업.xlsx`;
+      const gradeClass = `${selectedGrade}학년 ${selectedClassNum}반`;
+      corrections = data.corrections.filter(c => c.gradeClass === gradeClass);
+      fileName = `${gradeClass}_정정내역_백업.xlsx`;
     }
 
     if (corrections.length === 0) {
@@ -155,12 +202,9 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
   };
 
   const filteredStudents = useMemo(() => {
-    if (!selectedClass) return [];
-    const [gradeStr, classStr] = selectedClass.split('학년 ');
-    const grade = parseInt(gradeStr);
-    const classNum = parseInt(classStr.replace('반', ''));
-    return data.students.filter(s => s.grade === grade && s.class === classNum);
-  }, [selectedClass, data.students]);
+    if (selectedGrade === '' || selectedClassNum === '') return [];
+    return data.students.filter(s => s.grade === selectedGrade && s.class === selectedClassNum);
+  }, [selectedGrade, selectedClassNum, data.students]);
 
   const selectedStudent = useMemo(() => {
     return data.students.find(s => s.id === selectedStudentId) || null;
@@ -197,12 +241,13 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
 
     const commons: AvailableSubject[] = [];
     const commonNormNames = new Set<string>();
+    const electiveNamesInGrade = gradeSpecificElectiveNames.get(student.grade) || new Set<string>();
 
     data.timetable
       .filter(t => t.grade === student.grade && String(t.classNum) === String(student.class))
       .forEach(t => {
         const normName = normalizeSubjectName(t.subjectName);
-        const isActuallyAnElective = Array.from(globalElectiveNames).some((gn: string) => isSameSubject(gn, t.subjectName));
+        const isActuallyAnElective = Array.from(electiveNamesInGrade).some((gn: string) => isSameSubject(gn, t.subjectName));
         
         if (!isActuallyAnElective && !commonNormNames.has(normName)) {
           commonNormNames.add(normName);
@@ -333,23 +378,85 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[600px] flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold flex items-center gap-2">
-              <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span>
-              대상 학생 선택
-            </h2>
-            <select 
-              value={selectedClass} 
-              onChange={(e) => { setSelectedClass(e.target.value); setSelectedStudentId(null); }}
-              className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
-            >
-              <option value="">학급 선택</option>
-              {classes.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+          <div className="flex flex-col gap-3 mb-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span>
+                대상 학생 선택
+              </h2>
+              <button 
+                onClick={() => setShowAddForm(!showAddForm)}
+                className="text-[11px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition-colors"
+              >
+                {showAddForm ? '취소' : '+ 학생 추가'}
+              </button>
+            </div>
+            
+            {/* 학년/반 선택 분리 */}
+            <div className="grid grid-cols-2 gap-2">
+              <select 
+                value={selectedGrade} 
+                onChange={(e) => { 
+                  setSelectedGrade(e.target.value === '' ? '' : parseInt(e.target.value)); 
+                  setSelectedClassNum('');
+                  setSelectedStudentId(null); 
+                }}
+                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+              >
+                <option value="">학년 선택</option>
+                {availableGrades.map(g => <option key={g} value={g}>{g}학년</option>)}
+              </select>
+              <select 
+                value={selectedClassNum} 
+                onChange={(e) => { 
+                  setSelectedClassNum(e.target.value === '' ? '' : parseInt(e.target.value)); 
+                  setSelectedStudentId(null); 
+                }}
+                disabled={selectedGrade === ''}
+                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500 font-bold disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="">반 선택</option>
+                {availableClasses.map(c => <option key={c} value={c}>{c}반</option>)}
+              </select>
+            </div>
           </div>
+
+          {showAddForm && (
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 animate-in slide-in-from-top-2 duration-300">
+              <div className="space-y-3">
+                <input 
+                  type="text" 
+                  placeholder="학번 (예: 10101)" 
+                  value={newStudent.id}
+                  onChange={(e) => setNewStudent({...newStudent, id: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
+                <input 
+                  type="text" 
+                  placeholder="성명" 
+                  value={newStudent.name}
+                  onChange={(e) => setNewStudent({...newStudent, name: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
+                <textarea 
+                  placeholder="선택과목(쉼표 구분, 예: A_지구과학_1반, B_화학_2반)" 
+                  value={newStudent.electivesRaw}
+                  onChange={(e) => setNewStudent({...newStudent, electivesRaw: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg text-xs h-16"
+                />
+                <button 
+                  onClick={handleAddStudent}
+                  className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-xs"
+                >
+                  저장하기
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-            {!selectedClass ? (
-              <div className="text-center py-20 text-slate-400 text-sm italic">학급을 먼저 선택해 주세요.</div>
+            {(selectedGrade === '' || selectedClassNum === '') ? (
+              <div className="text-center py-20 text-slate-400 text-sm italic">학년과 반을 선택해 주세요.</div>
             ) : filteredStudents.length === 0 ? (
               <div className="text-center py-20 text-slate-400 text-sm">학생 정보가 없습니다.</div>
             ) : (
@@ -358,32 +465,33 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
                 const completedCorrections = data.corrections.filter(c => c.studentId === student.id && c.isCompleted).length;
                 
                 return (
-                  <button
-                    key={student.id}
-                    onClick={() => setSelectedStudentId(student.id)}
-                    className={`w-full text-left px-4 py-3 rounded-xl border transition-all flex items-center justify-between ${
-                      selectedStudentId === student.id 
-                        ? 'bg-indigo-50 border-indigo-200 shadow-sm scale-[1.02]' 
-                        : 'border-slate-100 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{student.id}</div>
-                      <div className="font-bold text-slate-800">{student.name}</div>
-                    </div>
-                    <div className="flex gap-1">
-                      {totalCorrections > 0 && (
-                        <span className="bg-indigo-600 text-white text-[9px] px-1.5 py-0.5 rounded-md font-bold">
-                          {totalCorrections}
-                        </span>
-                      )}
-                      {completedCorrections > 0 && (
-                        <span className="bg-green-500 text-white text-[9px] px-1.5 py-0.5 rounded-md font-bold">
-                          {completedCorrections}완료
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                  <div key={student.id} className="group relative">
+                    <button
+                      onClick={() => setSelectedStudentId(student.id)}
+                      className={`w-full text-left px-4 py-3 rounded-xl border transition-all flex items-center justify-between ${
+                        selectedStudentId === student.id 
+                          ? 'bg-indigo-50 border-indigo-200 shadow-sm scale-[1.02]' 
+                          : 'border-slate-100 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{student.id}</div>
+                        <div className="font-bold text-slate-800">{student.name}</div>
+                      </div>
+                      <div className="flex gap-1">
+                        {totalCorrections > 0 && (
+                          <span className="bg-indigo-600 text-white text-[9px] px-1.5 py-0.5 rounded-md font-bold">
+                            {totalCorrections}
+                          </span>
+                        )}
+                        {completedCorrections > 0 && (
+                          <span className="bg-green-500 text-white text-[9px] px-1.5 py-0.5 rounded-md font-bold">
+                            {completedCorrections}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  </div>
                 );
               })
             )}
@@ -395,7 +503,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
             <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl h-[600px] flex flex-col items-center justify-center text-slate-400 p-10 text-center">
               <div className="text-6xl mb-6 opacity-20">👋</div>
               <p className="font-bold text-xl text-slate-600 mb-2">학생을 선택해주세요</p>
-              <p className="text-sm">학급을 먼저 고른 뒤, 왼쪽 목록에서 학생을 클릭하세요.</p>
+              <p className="text-sm">학년/반을 고른 뒤, 왼쪽 목록에서 학생을 클릭하세요.</p>
             </div>
           ) : (
             <>
@@ -403,7 +511,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h3 className="text-xl font-black text-slate-900">{selectedStudent.name} <span className="text-slate-400 font-medium text-sm ml-1">{selectedStudent.id}</span></h3>
-                    <p className="text-sm text-indigo-600 font-bold">{selectedClass}</p>
+                    <p className="text-sm text-indigo-600 font-bold">{selectedStudent.grade}학년 {selectedStudent.class}반</p>
                   </div>
                   <button onClick={() => setSelectedStudentId(null)} className="text-slate-400 hover:text-slate-600 text-sm font-bold bg-slate-100 px-4 py-2 rounded-xl transition-colors">
                     학생 닫기
@@ -482,7 +590,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack }) =>
                         <div className="flex-1">
                           <div className="text-xs font-bold text-indigo-600 mb-1">{c.subjectName}</div>
                           <div className="flex items-center gap-4 text-sm">
-                            <span className="text-slate-400 line-through decoration-rose-300/40">{c.before}</span>
+                            <span className="text-slate-500 font-medium">{c.before}</span>
                             <span className="text-slate-300">→</span>
                             <span className="font-bold text-slate-900">{c.after}</span>
                           </div>

@@ -179,7 +179,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
                   <div className="flex flex-1 items-start gap-4 bg-white/80 px-5 py-4 rounded-2xl border border-slate-100 shadow-sm min-w-0">
                     <div className="flex-1">
                       <div className="text-[10px] font-black text-slate-400 uppercase mb-1">기존</div>
-                      <div className="text-sm text-slate-400 line-through font-medium break-words whitespace-pre-wrap">{c.before}</div>
+                      <div className="text-sm text-slate-500 font-medium break-words whitespace-pre-wrap">{c.before}</div>
                     </div>
                     <div className="text-indigo-300 pt-5">
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
