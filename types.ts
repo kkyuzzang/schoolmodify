@@ -1,25 +1,25 @@
 
 export interface Student {
-  id: string; // 학번
-  name: string; // 이름
+  id: string; 
+  name: string; 
   grade: number;
   class: number;
-  electives: Elective[]; // 선택과목 목록
+  electives: Elective[]; 
 }
 
 export interface Elective {
-  raw: string; // 원본 문자열 (B_지구과학_8반)
-  group: string; // B
-  subjectName: string; // 지구과학
-  classNum: string; // 8 (선택반)
+  raw: string; 
+  group: string; 
+  subjectName: string; 
+  classNum: string; 
 }
 
 export interface TimetableEntry {
-  teacherName: string; // 김서휘
-  grade: number; // 2
-  subjectName: string; // 지구과학 I
-  classNum: string; // 8 (선택반 또는 정규반)
-  isCommon: boolean; // 공통과목 여부
+  teacherName: string; 
+  grade: number; 
+  subjectName: string; 
+  classNum: string; 
+  isCommon: boolean; 
 }
 
 export interface Correction {
@@ -28,17 +28,23 @@ export interface Correction {
   studentId: string;
   studentName: string;
   gradeClass: string;
-  subjectKey: string; // 매칭용 과목 키
+  subjectKey: string; 
   subjectName: string;
   before: string;
   after: string;
   teachers: string[];
   createdAt: number;
-  isCompleted?: boolean; // 완료 여부
-  completedAt?: number; // 완료 시각
+  isCompleted?: boolean; 
+  completedAt?: number; 
+  semester: number; 
 }
 
 export interface WorkspaceData {
+  password?: string; // 호스트 비밀번호
+  students1?: Student[];
+  timetable1?: TimetableEntry[];
+  students2?: Student[];
+  timetable2?: TimetableEntry[];
   students: Student[];
   timetable: TimetableEntry[];
   corrections: Correction[];
@@ -50,4 +56,9 @@ export enum AppState {
   HOMEROOM = 'HOMEROOM',
   TEACHER = 'TEACHER',
   DELETE_CONFIRM = 'DELETE_CONFIRM'
+}
+
+export enum UserRole {
+  HOST = 'HOST',
+  GUEST = 'GUEST'
 }

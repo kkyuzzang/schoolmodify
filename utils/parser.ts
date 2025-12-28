@@ -161,6 +161,11 @@ export const parseCorrectionExcel = async (file: File, workspaceCode: string): P
           const studentId = String(row['학번'] || '');
           const { grade, classNum } = parseGradeClass(studentId);
           
+          // 학기 정보 파싱: '학기' 컬럼에서 숫자를 추출하거나 기본값 1을 사용합니다.
+          const semesterRaw = String(row['학기'] || '1');
+          const semesterMatch = semesterRaw.match(/(\d)/);
+          const semester = semesterMatch ? parseInt(semesterMatch[1]) : 1;
+
           return {
             id: `imported_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
             workspaceCode,
@@ -172,7 +177,8 @@ export const parseCorrectionExcel = async (file: File, workspaceCode: string): P
             before: String(row['수정전'] || ''),
             after: String(row['수정후'] || ''),
             teachers: String(row['담당교사'] || '').split(',').map(t => t.trim()).filter(t => t),
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            semester // 'semester' 프로퍼티 추가하여 Correction 타입 준수
           };
         });
         

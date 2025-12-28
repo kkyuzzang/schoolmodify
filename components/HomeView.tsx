@@ -1,20 +1,71 @@
 
 import React, { useState } from 'react';
-import { AppState } from '../types';
-import { isCloudConnected } from '../services/storageService';
+import { AppState, UserRole } from '../types';
+import { isCloudConnected, getWorkspace, saveWorkspace } from '../services/storageService';
 
 interface HomeViewProps {
-  onNavigate: (view: AppState, code: string) => void;
+  onNavigate: (view: AppState, code: string, role: UserRole) => void;
 }
 
 const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<UserRole>(UserRole.GUEST);
+  const [isProcessing, setIsProcessing] = useState(false);
   const connected = isCloudConnected();
+
+  const MASTER_PW = '658584';
+
+  const handleJoin = async () => {
+    if (!code.trim()) return;
+    setIsProcessing(true);
+    
+    try {
+      const ws = await getWorkspace(code.trim());
+      
+      if (mode === UserRole.HOST) {
+        // 호스트 접속 로직
+        if (!ws.password) {
+          // 신규 생성 (데이터는 있으나 비밀번호가 지정되지 않은 초기 상태 포함)
+          if (!password) {
+            alert("워크스페이스를 처음 생성하시려면 비밀번호를 설정해주세요.");
+            setIsProcessing(false);
+            return;
+          }
+          await saveWorkspace(code.trim(), { password });
+          onNavigate(AppState.SELECT, code.trim(), UserRole.HOST);
+        } else {
+          // 기존 접속 확인
+          if (password === ws.password || password === MASTER_PW) {
+            onNavigate(AppState.SELECT, code.trim(), UserRole.HOST);
+          } else {
+            // 호스트 비밀번호 틀림 경고
+            alert("비밀번호가 틀렸습니다.");
+            setIsProcessing(false);
+            return;
+          }
+        }
+      } else {
+        // 게스트 접속 로직
+        // 호스트가 비밀번호를 설정하지 않았다면(ws.password가 undefined/empty) 생성되지 않은 워크스페이스
+        if (!ws || !ws.password) {
+          // 게스트 코드 미생성 경고
+          alert("코드가 생성되지 않았습니다.");
+          setIsProcessing(false);
+          return;
+        }
+        onNavigate(AppState.SELECT, code.trim(), UserRole.GUEST);
+      }
+    } catch (err) {
+      alert("접속 중 오류가 발생했습니다.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   return (
     <div className="max-w-md mx-auto mt-20 px-6">
       <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-100 relative overflow-hidden">
-        {/* 연결 상태 배지 */}
         <div className="absolute top-0 right-0 p-2">
           {connected ? (
             <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-600 text-[10px] font-black rounded-bl-xl border-l border-b border-green-100">
@@ -29,75 +80,70 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
           )}
         </div>
 
-        <h2 className="text-2xl font-bold text-slate-800 mb-2 mt-2">워크스페이스 접속</h2>
-        <p className="text-slate-500 mb-8 text-sm">
-          학교 구성원과 공유된 접속 코드를 입력하여 시작하세요.<br/>
-          <span className="text-[11px] text-indigo-500 font-bold">(예: 사과, 사과2 등 본교 교사들끼리만 공유할 코드 아무거나 설정)</span>
+        <div className="flex gap-2 mb-8 bg-slate-50 p-1 rounded-xl">
+          <button 
+            onClick={() => setMode(UserRole.GUEST)}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${mode === UserRole.GUEST ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}
+          >
+            교사(게스트) 접속
+          </button>
+          <button 
+            onClick={() => setMode(UserRole.HOST)}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${mode === UserRole.HOST ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400'}`}
+          >
+            담당자(호스트) 접속
+          </button>
+        </div>
+
+        <h2 className="text-xl font-bold text-slate-800 mb-2">워크스페이스 입장</h2>
+        <p className="text-slate-500 mb-8 text-[11px] leading-relaxed">
+          {mode === UserRole.HOST 
+            ? "관리자 권한으로 기초 데이터를 관리하고 삭제할 수 있습니다." 
+            : "일반 교사 권한으로 접속 코드를 입력하여 시작하세요."}
         </p>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">접속 코드</label>
+            <label className="block text-[11px] font-bold text-slate-500 mb-1">접속 코드</label>
             <input 
               type="text" 
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="코드를 입력하세요"
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all uppercase font-bold text-center text-lg tracking-widest"
-              onKeyDown={(e) => e.key === 'Enter' && code.trim() && onNavigate(AppState.SELECT, code.trim())}
+              placeholder="예: 우리학교2025"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all uppercase font-bold text-center text-lg tracking-widest"
+              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
             />
           </div>
 
+          {mode === UserRole.HOST && (
+            <div className="animate-in fade-in slide-in-from-top-2">
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">호스트 비밀번호</label>
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="비밀번호 입력"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold text-center"
+                onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+              />
+            </div>
+          )}
+
           <button
-            disabled={!code.trim()}
-            onClick={() => onNavigate(AppState.SELECT, code.trim())}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold py-4 px-4 rounded-xl transition-all shadow-lg shadow-indigo-100 active:scale-[0.98]"
+            disabled={!code.trim() || isProcessing}
+            onClick={handleJoin}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-indigo-100 active:scale-[0.98]"
           >
-            입장하기
+            {isProcessing ? "확인 중..." : "입장하기"}
           </button>
         </div>
       </div>
 
-      <div className="mt-12 space-y-4">
-        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest text-center">작동 방식</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-100/50 p-4 rounded-xl border border-slate-100">
-            <div className="text-indigo-600 font-bold text-xl mb-1">01</div>
-            <div className="text-xs font-bold text-slate-700">기본 데이터 업로드</div>
-            <div className="text-[10px] text-slate-500 leading-tight">학생 명단과 시간표 엑셀 파일을 업로드합니다.(대표 교사 1인만 실시)</div>
-          </div>
-          <div className="bg-slate-100/50 p-4 rounded-xl border border-slate-100">
-            <div className="text-indigo-600 font-bold text-xl mb-1">02</div>
-            <div className="text-xs font-bold text-slate-700">수정 사항 입력</div>
-            <div className="text-[10px] text-slate-500 leading-tight">담임 선생님이 학생의 정정 내역을 입력합니다.</div>
-          </div>
-          <div className="bg-slate-100/50 p-4 rounded-xl border border-slate-100">
-            <div className="text-indigo-600 font-bold text-xl mb-1">03</div>
-            <div className="text-xs font-bold text-slate-700">교사 자동 배정</div>
-            <div className="text-[10px] text-slate-500 leading-tight">시스템이 자동으로 담당 교사를 찾아 배정합니다.</div>
-          </div>
-          <div className="bg-slate-100/50 p-4 rounded-xl border border-slate-100">
-            <div className="text-indigo-600 font-bold text-xl mb-1">04</div>
-            <div className="text-xs font-bold text-slate-700">확인 및 완료</div>
-            <div className="text-[10px] text-slate-500 leading-tight">교사들이 자신의 정정 목록을 확인하고, 나이스에 수정한 후 체크합니다.</div>
-          </div>
-        </div>
-        
-        {!connected && (
-          <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl mt-6">
-            <p className="text-[11px] text-amber-700 font-bold text-center leading-normal">
-              ⚠️ 현재 서버에 연결되지 않았습니다.<br/>
-              Vercel 설정에서 VITE_SUPABASE_URL과 KEY를 확인하신 후 Redeploy 해주세요.
-            </p>
-          </div>
-        )}
-
-        <div className="bg-slate-800 p-4 rounded-xl mt-6">
-          <p className="text-[10px] text-slate-400 font-medium text-center leading-normal">
-            접속 코드를 본교 교원들을 제외한 타인에게 공유하지 마세요.<br/>
-            접속 코드만 공유되지 않는다면 개인정보는 안전하게 보호됩니다.
-          </p>
-        </div>
+      <div className="mt-8 bg-slate-800 p-4 rounded-xl">
+        <p className="text-[10px] text-slate-400 font-medium text-center leading-normal">
+          접속 코드와 호스트 비밀번호를 본교 교원 외 타인에게 공유하지 마세요.<br/>
+          호스트 권한으로만 기초 데이터 수정 및 워크스페이스 삭제가 가능합니다.
+        </p>
       </div>
     </div>
   );

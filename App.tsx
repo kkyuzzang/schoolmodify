@@ -1,29 +1,35 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppState } from './types';
+import { AppState, UserRole } from './types';
 import HomeView from './components/HomeView';
 import HomeroomView from './components/HomeroomView';
 import TeacherView from './components/TeacherView';
-import { clearWorkspace } from './services/storageService';
+import { clearWorkspace, getWorkspace } from './services/storageService';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [workspaceCode, setWorkspaceCode] = useState<string>('');
+  const [userRole, setUserRole] = useState<UserRole>(UserRole.GUEST);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [delPassword, setDelPassword] = useState('');
+
+  const MASTER_PW = '658584';
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
       if (!hash) {
         setView(AppState.HOME);
+        setWorkspaceCode('');
       }
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const navigateTo = (newView: AppState, code: string) => {
+  const navigateTo = (newView: AppState, code: string, role: UserRole) => {
     setWorkspaceCode(code);
+    setUserRole(role);
     setView(newView);
   };
 
@@ -32,12 +38,28 @@ const App: React.FC = () => {
   };
 
   const handleConfirmDelete = async () => {
+    if (userRole === UserRole.GUEST) {
+      alert("생기부 담당자(호스트)만 삭제할 수 있습니다.");
+      return;
+    }
+
+    if (!delPassword) {
+      alert("삭제를 위해 호스트 비밀번호를 입력해주세요.");
+      return;
+    }
+
     setIsDeleting(true);
     try {
-      await clearWorkspace(workspaceCode);
-      alert("서버의 모든 데이터가 성공적으로 삭제되었습니다.");
-      setView(AppState.HOME);
-      setWorkspaceCode('');
+      const ws = await getWorkspace(workspaceCode);
+      if (delPassword === ws.password || delPassword === MASTER_PW) {
+        await clearWorkspace(workspaceCode);
+        alert("서버의 모든 데이터가 성공적으로 삭제되었습니다.");
+        setView(AppState.HOME);
+        setWorkspaceCode('');
+        setDelPassword('');
+      } else {
+        alert("비밀번호가 일치하지 않습니다.");
+      }
     } catch (err) {
       alert("삭제 중 오류가 발생했습니다.");
     } finally {
@@ -57,6 +79,9 @@ const App: React.FC = () => {
         </div>
         {workspaceCode && (
           <div className="flex items-center gap-4">
+            <span className={`px-3 py-1 rounded-full text-xs font-black border ${userRole === UserRole.HOST ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+              {userRole === UserRole.HOST ? '관리자(HOST)' : '일반교사(GUEST)'}
+            </span>
             <span className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-sm font-bold border border-indigo-100">
               코드: {workspaceCode}
             </span>
@@ -72,7 +97,7 @@ const App: React.FC = () => {
 
       <main className="flex-1 overflow-auto bg-slate-50">
         {view === AppState.HOME && (
-          <HomeView onNavigate={(v, c) => navigateTo(AppState.SELECT, c)} />
+          <HomeView onNavigate={(v, c, r) => navigateTo(AppState.SELECT, c, r)} />
         )}
 
         {view === AppState.SELECT && (
@@ -88,7 +113,7 @@ const App: React.FC = () => {
                 >
                   <div className="text-4xl mb-4 group-hover:scale-110 transition-transform">📋</div>
                   <div className="font-bold text-slate-800 text-lg">담임 교사</div>
-                  <div className="text-xs text-slate-500 mt-2">정정 사항 입력 및<br/>기초 데이터 관리</div>
+                  <div className="text-xs text-slate-500 mt-2">정정 사항 입력 및<br/>{userRole === UserRole.HOST ? '기초 데이터 관리' : '현황 확인'}</div>
                 </button>
                 <button
                   onClick={() => setView(AppState.TEACHER)}
@@ -100,20 +125,13 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setView(AppState.DELETE_CONFIRM)}
-                  className="group p-8 rounded-2xl border-2 border-slate-100 hover:border-rose-600 hover:bg-rose-50 transition-all text-center"
+                  className={`group p-8 rounded-2xl border-2 border-slate-100 hover:border-rose-600 hover:bg-rose-50 transition-all text-center ${userRole === UserRole.GUEST ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
                 >
                   <div className="text-4xl mb-4 group-hover:scale-110 transition-transform">⚠️</div>
-                  <div className="font-bold text-rose-600 text-lg">개인정보 전체 삭제</div>
-                  <div className="text-xs text-slate-500 mt-2">워크스페이스의 모든<br/>데이터를 영구 삭제</div>
+                  <div className="font-bold text-rose-600 text-lg">전체 데이터 삭제</div>
+                  <div className="text-xs text-slate-500 mt-2">{userRole === UserRole.HOST ? '비밀번호 확인 후 삭제' : '담당자 전용 메뉴'}</div>
                 </button>
               </div>
-              
-              <button 
-                onClick={() => { setView(AppState.HOME); setWorkspaceCode(''); }}
-                className="mt-8 text-slate-400 text-sm font-bold hover:text-slate-600 underline underline-offset-4"
-              >
-                다른 코드로 접속하기
-              </button>
             </div>
           </div>
         )}
@@ -123,16 +141,32 @@ const App: React.FC = () => {
             <div className="bg-white p-10 rounded-3xl shadow-2xl border-2 border-rose-100 text-center">
               <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">⚠️</div>
               <h2 className="text-2xl font-black text-slate-800 mb-4">정말 삭제하시겠습니까?</h2>
-              <div className="bg-rose-50 p-6 rounded-2xl mb-8">
-                <p className="text-rose-700 font-bold leading-relaxed">
-                  이 버튼을 실행하면 서버에 저장된 모든 자료와 개인정보가 사라집니다.<br/>
-                  다른 선생님들의 화면에서도 모든 데이터가 즉시 초기화됩니다.
+              
+              <div className="bg-rose-50 p-6 rounded-2xl mb-8 text-left">
+                <p className="text-rose-700 font-bold leading-relaxed mb-4">
+                  이 작업은 되돌릴 수 없습니다. 모든 기초 데이터와 선생님들이 입력한 정정 내역이 영구적으로 사라집니다.
                 </p>
+                {userRole === UserRole.HOST ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-rose-800">호스트 비밀번호 확인</label>
+                    <input 
+                      type="password" 
+                      value={delPassword}
+                      onChange={(e) => setDelPassword(e.target.value)}
+                      placeholder="비밀번호를 입력하세요"
+                      className="w-full px-4 py-3 rounded-xl border border-rose-200 focus:ring-2 focus:ring-rose-500 outline-none font-bold text-center"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-center text-rose-900 font-black py-2">
+                    "생기부 담당자(호스트)만 삭제할 수 있습니다."
+                  </p>
+                )}
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <button
-                  disabled={isDeleting}
+                  disabled={isDeleting || userRole === UserRole.GUEST}
                   onClick={handleConfirmDelete}
                   className="py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl shadow-lg shadow-rose-100 transition-all active:scale-95 disabled:opacity-50"
                 >
@@ -151,34 +185,12 @@ const App: React.FC = () => {
         )}
 
         {view === AppState.HOMEROOM && (
-          <HomeroomView workspaceCode={workspaceCode} onBack={goBackToSelect} />
+          <HomeroomView workspaceCode={workspaceCode} onBack={goBackToSelect} role={userRole} />
         )}
         {view === AppState.TEACHER && (
           <TeacherView workspaceCode={workspaceCode} onBack={goBackToSelect} />
         )}
       </main>
-
-      <footer className="bg-white border-t border-slate-200 py-6 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-slate-500">
-          <div className="text-center md:text-left">
-            <span className="font-bold text-slate-700">만든 사람: </span> 
-            경기도 지구과학 교사 뀨짱
-          </div>
-          <div className="flex gap-4 font-bold text-xs">
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 font-medium text-[10px]">문의: </span>
-              <a href="https://open.kakao.com/o/s7hVU65h" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">카카오톡 오픈채팅</a>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 font-medium text-[10px]">블로그: </span>
-              <a href="https://eduarchive.tistory.com/" target="_blank" rel="noreferrer" className="text-slate-700 hover:underline">뀨짱쌤의 교육자료 아카이브</a>
-            </div>
-          </div>
-          <div className="text-slate-400 font-medium">
-            &copy; 2025 뀨짱쌤. All rights reserved.
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };

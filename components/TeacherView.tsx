@@ -21,16 +21,17 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
 
   useEffect(() => {
     fetchData();
-    // 3초마다 클라우드 데이터 확인하여 타 PC의 변경사항 실시간 반영
     const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, [workspaceCode]);
 
+  // 학기와 상관없이 모든 담당 교사 리스트 추출
   const teacherList = useMemo(() => {
     const set = new Set<string>();
-    data.timetable.forEach(t => set.add(t.teacherName));
+    (data.timetable1 || data.timetable || []).forEach(t => set.add(t.teacherName));
+    (data.timetable2 || []).forEach(t => set.add(t.teacherName));
     return Array.from(set).sort();
-  }, [data.timetable]);
+  }, [data.timetable1, data.timetable2, data.timetable]);
 
   // 각 교사별 미완료 정정 내역 갯수 계산
   const pendingCounts = useMemo(() => {
@@ -48,11 +49,14 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
     if (!selectedTeacher) return [];
     return data.corrections
       .filter(c => c.teachers.includes(selectedTeacher))
-      .sort((a, b) => a.studentId.localeCompare(b.studentId));
+      .sort((a, b) => {
+        // 학기 순 -> 학번 순
+        if (a.semester !== b.semester) return a.semester - b.semester;
+        return a.studentId.localeCompare(b.studentId);
+      });
   }, [selectedTeacher, data.corrections]);
 
   const handleToggleComplete = async (correctionId: string, currentStatus: boolean) => {
-    // 낙관적 업데이트 (UI 즉시 반응)
     setData(prev => ({
       ...prev,
       corrections: prev.corrections.map(c => 
@@ -60,9 +64,8 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
       )
     }));
     
-    // DB 업데이트
     await updateCorrectionStatus(workspaceCode, correctionId, !currentStatus);
-    await fetchData(); // 최종 데이터 동기화
+    await fetchData();
   };
 
   if (isLoading) {
@@ -92,7 +95,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
         <h2 className="text-2xl font-black text-slate-800 mb-6">교과 담당 교사 확인</h2>
         
         <div className="space-y-6">
-          <p className="text-slate-500 text-sm font-medium">성함을 선택하여 배정된 정정 내역을 확인하세요. (모든 기기 실시간 동기화됨)</p>
+          <p className="text-slate-500 text-sm font-medium">성함을 선택하여 배정된 정정 내역을 확인하세요. (1, 2학기 내역이 모두 취합됩니다.)</p>
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {teacherList.map(name => {
@@ -133,7 +136,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
             <div>
               <h3 className="text-2xl font-black text-slate-900">{selectedTeacher} 선생님의 정정 목록</h3>
               <p className="text-slate-500 text-sm mt-1 font-bold">
-                총 {teacherCorrections.length}건 중 {teacherCorrections.filter(c => c.isCompleted).length}건 완료
+                총 {teacherCorrections.length}건 중 {teacherCorrections.filter(c => c.isCompleted).length}건 완료 (전체 학기 합산)
               </p>
             </div>
             <div className="bg-green-50 text-green-700 px-4 py-2 rounded-xl text-xs font-black border border-green-200 flex items-center gap-2">
@@ -153,7 +156,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
                 <div key={c.id} className={`group bg-white border-2 rounded-2xl p-6 transition-all relative overflow-hidden flex flex-col md:flex-row md:items-start gap-6 ${
                   c.isCompleted ? 'border-green-100 bg-green-50/20 opacity-70' : 'border-slate-100 hover:border-indigo-200'
                 }`}>
-                  <div className={`absolute top-0 left-0 w-1.5 h-full ${c.isCompleted ? 'bg-green-400' : 'bg-indigo-500'}`}></div>
+                  <div className={`absolute top-0 left-0 w-1.5 h-full ${c.isCompleted ? 'bg-green-400' : (c.semester === 1 ? 'bg-blue-500' : 'bg-orange-500')}`}></div>
                   
                   <div className="flex items-center pt-1">
                     <input 
@@ -171,8 +174,13 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
                       <span className="text-lg font-black text-slate-900">{c.studentName}</span>
                       <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full font-bold">{c.gradeClass}</span>
                     </div>
-                    <div className="text-indigo-600 font-black text-base">
-                      {c.subjectName}
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${c.semester === 1 ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>
+                        [{c.semester}학기]
+                      </span>
+                      <div className="text-indigo-600 font-black text-base">
+                        {c.subjectName}
+                      </div>
                     </div>
                   </div>
                   
