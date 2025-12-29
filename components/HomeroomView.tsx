@@ -9,7 +9,7 @@ import { isSameSubject, normalizeSubjectName, parseGradeClass } from '../utils/n
 interface HomeroomViewProps {
   workspaceCode: string;
   onBack: () => void;
-  role?: UserRole; // 사용자 역할 추가
+  role?: UserRole;
 }
 
 interface AvailableSubject {
@@ -115,7 +115,6 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
   };
 
   const handleBackupUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // 게스트는 백업 업로드가 불가능하도록 차단
     if (!isHost) {
       alert("백업 업로드는 생기부 담당자(호스트)만 가능합니다.");
       return;
@@ -377,7 +376,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                     <>
                       <input type="file" accept=".xlsx" onChange={(e) => handleStudentFileUpload(e, sem)} className="hidden" id={`student-upload-${sem}`} />
                       <label htmlFor={`student-upload-${sem}`} className="cursor-pointer inline-flex items-center px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-100">
-                        파일 선택 {(sem === 1 ? (data.students1?.length || data.students?.length) : data.students2?.length) > 0 && `(완료)`}
+                        파일 선택 {(sem === 1 ? ((data.students1?.length || 0) || (data.students?.length || 0)) : (data.students2?.length || 0)) > 0 && `(완료)`}
                       </label>
                     </>
                   ) : (
@@ -390,7 +389,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                     <>
                       <input type="file" accept=".xlsx" onChange={(e) => handleTimetableFileUpload(e, sem)} className="hidden" id={`timetable-upload-${sem}`} />
                       <label htmlFor={`timetable-upload-${sem}`} className="cursor-pointer inline-flex items-center px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-100">
-                        파일 선택 {(sem === 1 ? (data.timetable1?.length || data.timetable?.length) : data.timetable2?.length) > 0 && `(완료)`}
+                        파일 선택 {(sem === 1 ? ((data.timetable1?.length || 0) || (data.timetable?.length || 0)) : (data.timetable2?.length || 0)) > 0 && `(완료)`}
                       </label>
                     </>
                   ) : (
@@ -498,9 +497,9 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                   <div className="flex items-center justify-between mt-4">
                     <div className="text-[11px] font-bold">
                       {newCorrection.subjectKey && (() => {
-                        const sub = getAvailableSubjects(selectedStudent).find(s => s.key === newCorrection.subjectKey);
+                        const sub = getAvailableSubjects(selectedStudent!).find(s => s.key === newCorrection.subjectKey);
                         if (!sub) return null;
-                        const teachers = findTeachers(sub.subjectName, sub.classNum, sub.isElective, selectedStudent);
+                        const teachers = findTeachers(sub.subjectName, sub.classNum, sub.isElective, selectedStudent!);
                         const isFound = teachers[0] !== "담당교사 미확인";
                         return <span className={isFound ? "text-indigo-600" : "text-rose-500"}>담당: {teachers.join(', ')}</span>;
                       })()}
@@ -521,7 +520,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1"><span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${c.semester === 1 ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{c.semester}학기</span><div className="text-xs font-bold text-indigo-600">{c.subjectName}</div></div>
                           <div className="flex items-center gap-4 text-sm"><span className="text-slate-500 font-medium">{c.before}</span><span className="text-slate-300">→</span><span className="font-bold text-slate-900">{c.after}</span></div>
-                          <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-2"><span>담당교사: {c.teachers.length > 0 ? c.teachers.join(', ') : '미확인'}</span>{c.isCompleted && <span className="text-green-600 font-bold">(정정완료: {new Date(c.completedAt!).toLocaleString()})</span>}</div>
+                          <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-2"><span>담당교사: {c.teachers.length > 0 ? c.teachers.join(', ') : '미확인'}</span>{c.isCompleted && <span className="text-green-600 font-bold">(정정완료: {new Date(c.completedAt || 0).toLocaleString()})</span>}</div>
                         </div>
                         <button onClick={() => handleDeleteCorrection(c.id)} className="text-rose-500 hover:bg-rose-50 px-3 py-1 rounded-lg text-xs font-bold transition-all mt-2 md:mt-0 opacity-0 group-hover:opacity-100">삭제</button>
                       </div>

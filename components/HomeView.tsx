@@ -25,8 +25,8 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
       
       if (mode === UserRole.HOST) {
         // 호스트 접속 로직
-        if (!ws.password) {
-          // 신규 생성 (데이터는 있으나 비밀번호가 지정되지 않은 초기 상태 포함)
+        if (!ws || !ws.password) {
+          // 신규 생성
           if (!password) {
             alert("워크스페이스를 처음 생성하시려면 비밀번호를 설정해주세요.");
             setIsProcessing(false);
@@ -39,7 +39,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
           if (password === ws.password || password === MASTER_PW) {
             onNavigate(AppState.SELECT, code.trim(), UserRole.HOST);
           } else {
-            // 호스트 비밀번호 틀림 경고
             alert("비밀번호가 틀렸습니다.");
             setIsProcessing(false);
             return;
@@ -47,9 +46,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
         }
       } else {
         // 게스트 접속 로직
-        // 호스트가 비밀번호를 설정하지 않았다면(ws.password가 undefined/empty) 생성되지 않은 워크스페이스
         if (!ws || !ws.password) {
-          // 게스트 코드 미생성 경고
           alert("코드가 생성되지 않았습니다.");
           setIsProcessing(false);
           return;
