@@ -51,8 +51,13 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
     return data.corrections
       .filter(c => c.teachers.includes(selectedTeacher))
       .sort((a, b) => {
-        // 학기 순 -> 학번 순
+        // 1. 완료 여부 우선 정렬: 미완료(!isCompleted)가 위로, 완료가 아래로
+        if (!!a.isCompleted !== !!b.isCompleted) {
+          return a.isCompleted ? 1 : -1;
+        }
+        // 2. 같은 완료 상태 내에서는 학기 순
         if (a.semester !== b.semester) return a.semester - b.semester;
+        // 3. 같은 학기 내에서는 학번 순
         return a.studentId.localeCompare(b.studentId);
       });
   }, [selectedTeacher, data.corrections]);
