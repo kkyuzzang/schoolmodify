@@ -25,13 +25,14 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
     return () => clearInterval(interval);
   }, [workspaceCode]);
 
-  // 학기와 상관없이 모든 담당 교사 리스트 추출
+  // 학기와 상관없이 모든 담당 교사 리스트 추출 (수동 추가 포함)
   const teacherList = useMemo(() => {
     const set = new Set<string>();
     (data.timetable1 || data.timetable || []).forEach(t => set.add(t.teacherName));
     (data.timetable2 || []).forEach(t => set.add(t.teacherName));
+    (data.manualTimetable || []).forEach(t => set.add(t.teacherName));
     return Array.from(set).sort();
-  }, [data.timetable1, data.timetable2, data.timetable]);
+  }, [data.timetable1, data.timetable2, data.timetable, data.manualTimetable]);
 
   // 각 교사별 미완료 정정 내역 갯수 계산
   const pendingCounts = useMemo(() => {
@@ -123,7 +124,7 @@ const TeacherView: React.FC<TeacherViewProps> = ({ workspaceCode, onBack }) => {
             })}
             {teacherList.length === 0 && (
               <div className="text-slate-400 italic py-16 col-span-full text-center border-4 border-dashed border-slate-50 rounded-3xl">
-                등록된 데이터가 없습니다. 담임 페이지에서 엑셀을 업로드해주세요.
+                등록된 데이터가 없습니다. 담임 페이지에서 엑셀을 업로드하거나 수동으로 과목을 추가해주세요.
               </div>
             )}
           </div>

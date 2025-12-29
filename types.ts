@@ -40,11 +40,12 @@ export interface Correction {
 }
 
 export interface WorkspaceData {
-  password?: string; // 호스트 비밀번호
+  password?: string;
   students1?: Student[];
   timetable1?: TimetableEntry[];
   students2?: Student[];
   timetable2?: TimetableEntry[];
+  manualTimetable?: TimetableEntry[]; // 수동 추가된 과목들
   students: Student[];
   timetable: TimetableEntry[];
   corrections: Correction[];

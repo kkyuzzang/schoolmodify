@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { parseStudentExcel, parseTimetableExcel, parseCorrectionExcel } from '../utils/parser';
-import { getWorkspace, saveWorkspace, addCorrection, deleteCorrection, addMultipleCorrections } from '../services/storageService';
+import { getWorkspace, saveWorkspace, addCorrection, deleteCorrection } from '../services/storageService';
 import { Student, TimetableEntry, Correction, WorkspaceData, Elective, UserRole } from '../types';
 import { isSameSubject, normalizeSubjectName, parseGradeClass } from '../utils/normalization';
 
@@ -32,9 +32,13 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
   const [selectedGrade, setSelectedGrade] = useState<number | ''>('');
   const [selectedClassNum, setSelectedClassNum] = useState<number | ''>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showManualSubjectForm, setShowManualSubjectForm] = useState(false);
+
   const [newStudent, setNewStudent] = useState({ id: '', name: '', electivesRaw: '' });
   const [newCorrection, setNewCorrection] = useState({ subjectKey: '', before: '', after: '' });
+  const [manualSubject, setManualSubject] = useState({ grade: '', classNum: '', subjectName: '', teacherName: '' });
 
   const fetchData = async () => {
     const ws = await getWorkspace(workspaceCode);
@@ -54,8 +58,9 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
   }, [selectedSemester, data]);
 
   const currentSemesterTimetable = useMemo(() => {
-    if (selectedSemester === 1) return data.timetable1 || data.timetable || [];
-    return data.timetable2 || [];
+    const base = selectedSemester === 1 ? (data.timetable1 || data.timetable || []) : (data.timetable2 || []);
+    const manual = data.manualTimetable || [];
+    return [...base, ...manual];
   }, [selectedSemester, data]);
 
   const availableGrades = useMemo(() => {
@@ -122,11 +127,38 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
     if (!e.target.files?.[0]) return;
     setIsUploading(true);
     try {
-      const corrections = await parseCorrectionExcel(e.target.files[0], workspaceCode);
-      const formatted = corrections.map(c => ({ ...c, semester: c.semester || selectedSemester }));
-      await addMultipleCorrections(workspaceCode, formatted);
+      const newCorrectionsFromFile = await parseCorrectionExcel(e.target.files[0], workspaceCode);
+      const existingCorrections = [...data.corrections];
+      let addCount = 0;
+      let updateCount = 0;
+
+      newCorrectionsFromFile.forEach(nc => {
+        const foundIdx = existingCorrections.findIndex(ec => 
+          ec.studentId === nc.studentId && 
+          ec.semester === nc.semester && 
+          normalizeSubjectName(ec.subjectName) === normalizeSubjectName(nc.subjectName) &&
+          ec.before === nc.before &&
+          ec.after === nc.after
+        );
+
+        if (foundIdx > -1) {
+          if (nc.isCompleted && !existingCorrections[foundIdx].isCompleted) {
+            existingCorrections[foundIdx] = {
+              ...existingCorrections[foundIdx],
+              isCompleted: true,
+              completedAt: nc.completedAt || Date.now()
+            };
+            updateCount++;
+          }
+        } else {
+          existingCorrections.push(nc);
+          addCount++;
+        }
+      });
+
+      await saveWorkspace(workspaceCode, { corrections: existingCorrections });
       await fetchData();
-      alert(`${corrections.length}건의 정정 내역이 클라우드에 업로드되었습니다.`);
+      alert(`복구가 완료되었습니다.\n(신규 추가: ${addCount}건, 완료 상태 업데이트: ${updateCount}건)`);
     } catch (err) {
       alert('백업 파일 파싱 중 오류가 발생했습니다.');
     } finally {
@@ -134,8 +166,30 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
     }
   };
 
+  const handleAddManualSubject = async () => {
+    const { grade, classNum, subjectName, teacherName } = manualSubject;
+    if (!grade || !classNum || !subjectName || !teacherName) {
+      alert('학년, 반, 과목명, 교사 성함을 모두 입력해주세요.');
+      return;
+    }
+
+    const newEntry: TimetableEntry = {
+      grade: parseInt(grade),
+      classNum: String(classNum),
+      subjectName,
+      teacherName,
+      isCommon: false
+    };
+
+    const currentManual = data.manualTimetable || [];
+    await saveWorkspace(workspaceCode, { manualTimetable: [...currentManual, newEntry] });
+    await fetchData();
+    setManualSubject({ grade: '', classNum: '', subjectName: '', teacherName: '' });
+    setShowManualSubjectForm(false);
+    alert(`${grade}학년 ${classNum}반에 [${subjectName}(${teacherName})] 과목이 수동 추가되었습니다.`);
+  };
+
   const handleAddStudent = async () => {
-    if (!isHost) return;
     const { id, name, electivesRaw } = newStudent;
     if (!id || !name) {
       alert('학번과 이름을 입력해주세요.');
@@ -154,14 +208,18 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
     });
 
     const newStudentObj: Student = { id, name, grade, class: classNum, electives };
-    const updateKey = selectedSemester === 1 ? 'students1' : 'students2';
-    const currentList = currentSemesterStudents;
-    const updatedStudents = [...currentList.filter(s => s.id !== id), newStudentObj].sort((a, b) => a.id.localeCompare(b.id));
+    
+    const s1List = data.students1 || data.students || [];
+    const s2List = data.students2 || [];
+    
+    const updatedS1 = [...s1List.filter(s => s.id !== id), newStudentObj].sort((a, b) => a.id.localeCompare(b.id));
+    const updatedS2 = [...s2List.filter(s => s.id !== id), newStudentObj].sort((a, b) => a.id.localeCompare(b.id));
 
-    await saveWorkspace(workspaceCode, { [updateKey]: updatedStudents });
+    await saveWorkspace(workspaceCode, { students1: updatedS1, students2: updatedS2 });
     await fetchData();
     setNewStudent({ id: '', name: '', electivesRaw: '' });
     setShowAddForm(false);
+    alert(`${name} 학생이 1, 2학기 명단에 모두 추가되었습니다.`);
   };
 
   const downloadSampleA = () => {
@@ -199,7 +257,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
       '담당교사': c.teachers.join(', '),
       '수정전': c.before,
       '수정후': c.after,
-      '완료여부': c.isCompleted ? '완료' : '미완료',
+      '완료여부': c.isCompleted ? '정정완료' : '미완료',
       '완료시각': c.completedAt ? new Date(c.completedAt).toLocaleString() : ''
     }));
 
@@ -341,11 +399,14 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
             기초 데이터 입력 및 백업 관리
           </h2>
           <div className="flex flex-wrap gap-2">
+            <button onClick={() => setShowManualSubjectForm(!showManualSubjectForm)} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-100 hover:bg-indigo-100 transition-colors">
+              {showManualSubjectForm ? '수동 과목 닫기' : '수동 과목 추가'}
+            </button>
             {isHost && (
               <>
                 <input type="file" accept=".xlsx" onChange={handleBackupUpload} className="hidden" id="backup-upload" />
                 <label htmlFor="backup-upload" className="cursor-pointer px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-100 hover:bg-indigo-100 transition-colors">
-                  기존 백업 업로드
+                  기존 백업 복구(업로드)
                 </label>
               </>
             )}
@@ -357,6 +418,19 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
             </button>
           </div>
         </div>
+
+        {showManualSubjectForm && (
+          <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100 mb-6 animate-in slide-in-from-top-2 duration-300">
+            <h3 className="text-sm font-black text-indigo-700 mb-4">반별 과목/담당교사 직접 추가</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div><label className="text-[10px] font-bold text-indigo-400 uppercase">학년</label><input type="number" placeholder="학년" value={manualSubject.grade} onChange={(e) => setManualSubject({...manualSubject, grade: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs" /></div>
+              <div><label className="text-[10px] font-bold text-indigo-400 uppercase">반 (숫자만)</label><input type="text" placeholder="예: 1" value={manualSubject.classNum} onChange={(e) => setManualSubject({...manualSubject, classNum: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs" /></div>
+              <div><label className="text-[10px] font-bold text-indigo-400 uppercase">과목명</label><input type="text" placeholder="예: 화학I" value={manualSubject.subjectName} onChange={(e) => setManualSubject({...manualSubject, subjectName: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs" /></div>
+              <div><label className="text-[10px] font-bold text-indigo-400 uppercase">담당교사 (이름만)</label><input type="text" placeholder="예: 홍길동" value={manualSubject.teacherName} onChange={(e) => setManualSubject({...manualSubject, teacherName: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs" /></div>
+            </div>
+            <button onClick={handleAddManualSubject} className="mt-4 w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-xs shadow-md">해당 반 기초 데이터로 배정</button>
+          </div>
+        )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {[1, 2].map(sem => (
@@ -366,7 +440,7 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                 {!isHost && (
                   <div className="absolute inset-0 bg-slate-50/10 backdrop-blur-[1px] z-10 flex items-center justify-center rounded-xl pointer-events-none">
                     <span className="bg-white/90 px-3 py-1 rounded-lg text-[9px] font-black text-slate-400 border border-slate-100 shadow-sm">
-                      호스트 전용
+                      엑셀 파일 업로드는 호스트 전용입니다
                     </span>
                   </div>
                 )}
@@ -376,11 +450,11 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                     <>
                       <input type="file" accept=".xlsx" onChange={(e) => handleStudentFileUpload(e, sem)} className="hidden" id={`student-upload-${sem}`} />
                       <label htmlFor={`student-upload-${sem}`} className="cursor-pointer inline-flex items-center px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-100">
-                        파일 선택 {(sem === 1 ? ((data.students1?.length || 0) || (data.students?.length || 0)) : (data.students2?.length || 0)) > 0 && `(완료)`}
+                        파일 선택 {(sem === 1 ? ((data.students1?.length || 0) || (data.students || []).length) : (data.students2 || []).length) > 0 && `(완료)`}
                       </label>
                     </>
                   ) : (
-                    <span className="text-[10px] text-slate-400">데이터가 배정되었습니다</span>
+                    <span className="text-[10px] text-slate-400">명단 배정됨</span>
                   )}
                 </div>
                 <div className={`border-2 border-dashed border-slate-200 rounded-xl p-4 text-center transition-colors relative ${isHost ? 'hover:border-indigo-400' : 'opacity-50'}`}>
@@ -389,11 +463,11 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                     <>
                       <input type="file" accept=".xlsx" onChange={(e) => handleTimetableFileUpload(e, sem)} className="hidden" id={`timetable-upload-${sem}`} />
                       <label htmlFor={`timetable-upload-${sem}`} className="cursor-pointer inline-flex items-center px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-100">
-                        파일 선택 {(sem === 1 ? ((data.timetable1?.length || 0) || (data.timetable?.length || 0)) : (data.timetable2?.length || 0)) > 0 && `(완료)`}
+                        파일 선택 {(sem === 1 ? ((data.timetable1?.length || 0) || (data.timetable || []).length) : (data.timetable2 || []).length) > 0 && `(완료)`}
                       </label>
                     </>
                   ) : (
-                    <span className="text-[10px] text-slate-400">데이터가 배정되었습니다</span>
+                    <span className="text-[10px] text-slate-400">시간표 배정됨</span>
                   )}
                 </div>
               </div>
@@ -411,14 +485,12 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
                 <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span>
                 대상 학생 선택
               </h2>
-              {isHost && (
-                <button 
-                  onClick={() => setShowAddForm(!showAddForm)}
-                  className="text-[11px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition-colors"
-                >
-                  {showAddForm ? '취소' : '+ 학생 추가'}
-                </button>
-              )}
+              <button 
+                onClick={() => setShowAddForm(!showAddForm)}
+                className="text-[11px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition-colors"
+              >
+                {showAddForm ? '취소' : '+ 학생 추가'}
+              </button>
             </div>
             
             <div className="grid grid-cols-1 gap-2">
@@ -434,13 +506,14 @@ const HomeroomView: React.FC<HomeroomViewProps> = ({ workspaceCode, onBack, role
             </div>
           </div>
 
-          {showAddForm && isHost && (
+          {showAddForm && (
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 animate-in slide-in-from-top-2 duration-300">
               <div className="space-y-3">
+                <p className="text-[10px] text-slate-400 font-bold text-center mb-1">* 1, 2학기 명단에 모두 추가됩니다.</p>
                 <input type="text" placeholder="학번 (예: 10101)" value={newStudent.id} onChange={(e) => setNewStudent({...newStudent, id: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs" />
                 <input type="text" placeholder="성명" value={newStudent.name} onChange={(e) => setNewStudent({...newStudent, name: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs" />
                 <textarea placeholder="선택과목(쉼표 구분, 예: A_지구과학_1반, B_화학_2반)" value={newStudent.electivesRaw} onChange={(e) => setNewStudent({...newStudent, electivesRaw: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-xs h-16" />
-                <button onClick={handleAddStudent} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-xs">{selectedSemester}학기 명단에 추가</button>
+                <button onClick={handleAddStudent} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-xs shadow-md">공통 명단에 추가하기</button>
               </div>
             </div>
           )}

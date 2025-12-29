@@ -61,8 +61,7 @@ export const parseStudentExcel = async (file: File): Promise<Student[]> => {
 };
 
 /**
- * 새로운 격자 형태 교사 시간표 파싱 (File B)
- * 양식: 2행 학년(E2~), 3행 반(E3~), B열 과목(B4~), D열 교사(D4~)
+ * 교사 시간표 파싱
  */
 export const parseTimetableExcel = async (file: File): Promise<TimetableEntry[]> => {
   return new Promise((resolve, reject) => {
@@ -79,10 +78,9 @@ export const parseTimetableExcel = async (file: File): Promise<TimetableEntry[]>
           return;
         }
 
-        const gradeRow = rows[1]; // 2행 (Index 1)
-        const classRow = rows[2]; // 3행 (Index 2)
+        const gradeRow = rows[1];
+        const classRow = rows[2];
         
-        // 학년 정보 Forward-fill (병합 셀 대응)
         const columnContext: { grade: number; classNum: string }[] = [];
         let lastGrade = 0;
         
@@ -93,34 +91,27 @@ export const parseTimetableExcel = async (file: File): Promise<TimetableEntry[]>
             const gradeMatch = gradeVal.match(/(\d+)/);
             if (gradeMatch) lastGrade = parseInt(gradeMatch[1]);
           }
-          
           const classVal = String(classRow[c] || '').trim();
           const classMatch = classVal.match(/(\d+)/);
           const classNum = classMatch ? classMatch[1] : '';
-
           columnContext[c] = { grade: lastGrade, classNum: classNum };
         }
 
         const entries: TimetableEntry[] = [];
         const seenKeys = new Set<string>();
 
-        // 4행(Index 3)부터 데이터 행 시작
         for (let r = 3; r < rows.length; r++) {
           const row = rows[r];
           if (!row || row.length < 5) continue;
-
-          const subjectName = String(row[1] || '').trim(); // B열
-          const teacherName = String(row[3] || '').trim(); // D열
-
+          const subjectName = String(row[1] || '').trim();
+          const teacherName = String(row[3] || '').trim();
           if (!subjectName || !teacherName) continue;
 
           for (let c = 4; c < row.length; c++) {
             const hours = row[c];
             const context = columnContext[c];
-            
             if (context && context.grade > 0 && context.classNum && 
                 hours !== undefined && hours !== null && hours !== '' && !isNaN(Number(hours))) {
-              
               const key = `${teacherName}|${context.grade}|${subjectName}|${context.classNum}`;
               if (!seenKeys.has(key)) {
                 seenKeys.add(key);
@@ -160,11 +151,25 @@ export const parseCorrectionExcel = async (file: File, workspaceCode: string): P
         const corrections: Correction[] = rows.map((row, idx) => {
           const studentId = String(row['학번'] || '');
           const { grade, classNum } = parseGradeClass(studentId);
-          
-          // 학기 정보 파싱: '학기' 컬럼에서 숫자를 추출하거나 기본값 1을 사용합니다.
           const semesterRaw = String(row['학기'] || '1');
           const semesterMatch = semesterRaw.match(/(\d)/);
           const semester = semesterMatch ? parseInt(semesterMatch[1]) : 1;
+
+          // 완료 여부 정확히 확인: "정정완료" 또는 "완료" 인 경우만 true (미완료 제외)
+          const completionStatus = String(row['완료여부'] || '').trim();
+          const isCompleted = completionStatus === '정정완료' || completionStatus === '완료';
+          
+          const completedAtRaw = row['완료시각'];
+          let completedAt: number | undefined = undefined;
+          
+          if (isCompleted) {
+            if (completedAtRaw) {
+              const parsedDate = new Date(completedAtRaw).getTime();
+              completedAt = isNaN(parsedDate) ? Date.now() : parsedDate;
+            } else {
+              completedAt = Date.now();
+            }
+          }
 
           return {
             id: `imported_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
@@ -178,7 +183,9 @@ export const parseCorrectionExcel = async (file: File, workspaceCode: string): P
             after: String(row['수정후'] || ''),
             teachers: String(row['담당교사'] || '').split(',').map(t => t.trim()).filter(t => t),
             createdAt: Date.now(),
-            semester // 'semester' 프로퍼티 추가하여 Correction 타입 준수
+            semester,
+            isCompleted,
+            completedAt
           };
         });
         
